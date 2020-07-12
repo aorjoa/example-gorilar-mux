@@ -1,13 +1,16 @@
 package main
 
 import (
-	"context"
+	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"thaichana/logger"
 	"time"
 
 	"github.com/spf13/viper"
@@ -25,12 +28,12 @@ func init() {
 }
 
 func main() {
-	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	l, _ := zap.NewDevelopment()
+	defer l.Sync()
 
 	hostname, _ := os.Hostname()
-	logger = logger.With(zap.String("hostname", hostname))
-	zap.ReplaceGlobals(logger)
+	l = l.With(zap.String("hostname", hostname))
+	zap.ReplaceGlobals(l)
 
 	db, err := sql.Open("sqlite3", viper.GetString("db.conn"))
 	if err != nil {
@@ -41,7 +44,8 @@ func main() {
 
 	r := mux.NewRouter()
 
-	r.Use(LoggerMiddleWare(logger))
+	r.Use(logger.MiddleWare(l))
+	r.Use(SealMiddleWare())
 
 	// This will serve files under http://localhost:8000/static/<filename>
 	r.HandleFunc("/recently", Recently).Methods(http.MethodPost)
@@ -96,7 +100,6 @@ func CheckIn(check Iner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var chk Check
 
-		r.Context().Value("logger").(*zap.Logger).Info("Checking...")
 		if err := json.NewDecoder(r.Body).Decode(&chk); err != nil {
 			w.WriteHeader(500)
 			json.NewEncoder(w).Encode(err)
@@ -110,8 +113,12 @@ func CheckIn(check Iner) http.HandlerFunc {
 			return
 		}
 
-		w.WriteHeader(200)
-		json.NewEncoder(w).Encode(chk)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "ok",
+		})
+
+		// w.WriteHeader(200)
+		// json.NewEncoder(w).Encode(chk)
 	}
 }
 
@@ -120,12 +127,37 @@ func CheckOut(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func LoggerMiddleWare(logger *zap.Logger) mux.MiddlewareFunc {
+func SealMiddleWare() mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			newLogger := logger.With(zap.String("middleware", "test"))
-			nr := r.WithContext(context.WithValue(r.Context(), "logger", newLogger))
-			next.ServeHTTP(w, nr)
+
+			b, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+			}
+
+			data, err := base64.StdEncoding.DecodeString(string(b))
+			if err != nil {
+				return
+			}
+
+			buff := bytes.NewBuffer(data)
+			if err != nil {
+				return
+			}
+
+			r.Body = ioutil.NopCloser(buff)
+
+			next.ServeHTTP(&EncoderWriter{w}, r)
+
 		})
 	}
+}
+
+type EncoderWriter struct {
+	http.ResponseWriter
+}
+
+func (w *EncoderWriter) Write(b []byte) (int, error) {
+	str := base64.StdEncoding.EncodeToString(b)
+	return w.ResponseWriter.Write([]byte(str))
 }
