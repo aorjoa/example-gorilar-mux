@@ -42,6 +42,10 @@ type Location struct {
 
 // Recently returns currently visited
 func Recently(w http.ResponseWriter, r *http.Request) {
+}
+
+// CheckIn check-in to place, returns density (ok, too much)
+func CheckIn(w http.ResponseWriter, r *http.Request) {
 	var chk Check
 	if err := json.NewDecoder(r.Body).Decode(&chk); err != nil {
 		w.WriteHeader(500)
@@ -63,11 +67,6 @@ func Recently(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(err)
 		return
 	}
-}
-
-// CheckIn check-in to place, returns density (ok, too much)
-func CheckIn(w http.ResponseWriter, r *http.Request) {
-
 }
 
 // CheckOut check-out from place
